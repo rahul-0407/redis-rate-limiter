@@ -4,8 +4,8 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 export const rateLimiter = async (req, res, next) => {
     const key = `rate:${req.ip}`
-    const limit = 10;
-    const window = 60;
+    const limit = 3;
+    const window = 20;
     
     const current = await redis.incr(key)
 

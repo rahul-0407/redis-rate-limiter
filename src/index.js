@@ -5,7 +5,6 @@ const app = express();
 app.use(express.json());
 
 app.post("/", async (req, res) => {
-    res.send('Hello');
 
     res.status(200).json({
         success: true,
@@ -16,7 +15,6 @@ app.post("/", async (req, res) => {
 
 
 app.post("/user", rateLimiter, async (req, res) => {
-    res.send('Hello user');
 
     res.status(200).json({
         success: true,
