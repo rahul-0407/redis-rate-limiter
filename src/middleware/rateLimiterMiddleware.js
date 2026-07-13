@@ -18,7 +18,7 @@ export function rateLimiterMiddleware(limiter, opts = {}){
         const result = await limiter.check(key, limit, cost);
 
         res.set("X-RateLimit-Limit", String(limit.rate));
-        res.set("X-RateLimit-Remaining", String(Math.max(result.remainin, 0)));
+        res.set("X-RateLimit-Remaining", String(Math.max(result.remaining, 0)));
 
         if(result.retryAfterMs){
             res.set("Retry-After", String(Math.ceil(result.retryAfterMs / 1000)));
