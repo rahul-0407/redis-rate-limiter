@@ -1,6 +1,6 @@
 // middleware to set rate-limiter headers for browsers(client)
 
-import { resolveCost, resolveLimit } from "../config/limits";
+import { resolveCost, resolveLimit } from "../config/limits.js";
 
 export function rateLimiterMiddleware(limiter, opts = {}){
     const identify = opts.identity || ((req) => req.user?.id || req.ip);
@@ -24,7 +24,7 @@ export function rateLimiterMiddleware(limiter, opts = {}){
             res.set("Retry-After", String(Math.ceil(result.retryAfterMs / 1000)));
         }
 
-        if(!result.allwed){
+        if(!result.allowed){
             return res.status(429).json({
                 error: "rate_limit_exceeded",
                 message: "Too many requests. Slow down",
@@ -33,6 +33,5 @@ export function rateLimiterMiddleware(limiter, opts = {}){
         }
 
         next();
-
     }
 } 

@@ -14,7 +14,7 @@ local increment = emission_interval * cost
 local delay_tolerance = emission_interval * burst
 
 local tat = tonumber(redis.call('GET', key))
-if tat == nill then
+if tat == nil then
     tat = now
 end
 tat = math.max(tat, now)
