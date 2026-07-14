@@ -13,19 +13,30 @@ services:
       timeout: 3s
       retries: 5
 
-  app:
+  rate-limit-service:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: rate-limiter-app
-    ports:
-      - "3000:3000"
+      dockerfile: services/rate-limit-service/Dockerfile
+    container_name: rate-limit-service
     environment:
       REDIS_URL: redis://redis:6379
-      NODE_ENV: production
+      GRPC_PORT: 50051
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  backend-service:
+    build:
+      context: .
+      dockerfile: services/backend-service/Dockerfile
+    container_name: backend-service
+    ports:
+      - "3000:3000"
+    environment:
+      RATE_LIMIT_SERVICE_URL: rate-limit-service:50051
+    depends_on:
+      - rate-limit-service
     restart: unless-stopped
 
 volumes:

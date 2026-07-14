@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package ratelimit;
+
+service RateLimitService {
+  rpc CheckLimit (CheckLimitRequest) returns (CheckLimitResponse);
+}
+
+message CheckLimitRequest {
+  string entity_id = 1;
+  string route = 2;
+  string method = 3;
+  string tier = 4;   
+}
+
+message CheckLimitResponse {
+  bool allowed = 1;
+  int32 remaining = 2;
+  int64 retry_after_ms = 3;
+  string source = 4;
+}
