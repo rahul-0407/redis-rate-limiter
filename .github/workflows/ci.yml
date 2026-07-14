@@ -1,0 +1,75 @@
+name: CI (JS)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test-and-build:
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # smoke test 
+      - name: Smoke test
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: |
+          node src/index.js &
+          APP_PID=$!
+          sleep 2
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/user)
+          kill $APP_PID
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test failed: expected 200, got $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed"
+
+  build-and-push-image:
+    needs: smoke-test-and-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/rate-limiter:js-latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/rate-limiter:js-${{ github.sha }}
