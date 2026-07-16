@@ -1,75 +1,140 @@
-# name: CI (JS)
+name: CI
 
-# on:
-#   push:
-#     branches: [main]
-#   pull_request:
-#     branches: [main]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-# jobs:
-#   smoke-test-and-build:
-#     runs-on: ubuntu-latest
+jobs:
+  test-rate-limit-service:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        working-directory: services/rate-limit-service
+        run: npm ci
+      - name: Smoke test (boot the gRPC server against real Redis)
+        working-directory: services/rate-limit-service
+        env:
+          REDIS_URL: redis://localhost:6379
+          GRPC_PORT: 50051
+        run: |
+          node src/server.js &
+          SERVER_PID=$!
+          sleep 2
+          # confirm the process is still alive (didn't crash on boot)
+          if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo "rate-limit-service failed to start"
+            exit 1
+          fi
+          kill $SERVER_PID
+          echo "rate-limit-service booted successfully"
 
-#     services:
-#       redis:
-#         image: redis:7-alpine
-#         ports:
-#           - 6379:6379
-#         options: >-
-#           --health-cmd "redis-cli ping"
-#           --health-interval 5s
-#           --health-timeout 3s
-#           --health-retries 5
+  test-backend-service:
+    runs-on: ubuntu-latest
+    needs: test-rate-limit-service
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
+      - name: Install rate-limit-service deps
+        working-directory: services/rate-limit-service
+        run: npm ci
+      - name: Start rate-limit-service
+        working-directory: services/rate-limit-service
+        env:
+          REDIS_URL: redis://localhost:6379
+          GRPC_PORT: 50051
+        run: nohup node src/server.js > rls.log 2>&1 &
 
-#       - name: Set up Node
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: '20'
-#           cache: 'npm'
+      - name: Install backend-service deps
+        working-directory: services/backend-service
+        run: npm ci
+      - name: Wait for rate-limit-service to be ready
+        run: sleep 3
+      - name: Start backend-service and smoke test the full chain
+        working-directory: services/backend-service
+        env:
+          RATE_LIMIT_SERVICE_URL: localhost:50051
+        run: |
+          node src/index.js &
+          APP_PID=$!
+          sleep 2
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/user)
+          kill $APP_PID
+          if [ "$STATUS" != "200" ]; then
+            echo "End-to-end smoke test failed: expected 200, got $STATUS"
+            exit 1
+          fi
+          echo "Full chain (HTTP -> gRPC -> Redis) smoke test passed"
 
-#       - name: Install dependencies
-#         run: npm ci
 
-#       # smoke test 
-#       - name: Smoke test
-#         env:
-#           REDIS_URL: redis://localhost:6379
-#         run: |
-#           node src/index.js &
-#           APP_PID=$!
-#           sleep 2
-#           STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/user)
-#           kill $APP_PID
-#           if [ "$STATUS" != "200" ]; then
-#             echo "Smoke test failed: expected 200, got $STATUS"
-#             exit 1
-#           fi
-#           echo "Smoke test passed"
+  build-and-push-images:
+    needs: [test-rate-limit-service, test-backend-service]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      id-token: write  
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "431092647962"
+    steps:
+      - uses: actions/checkout@v4
 
-#   build-and-push-image:
-#     needs: smoke-test-and-build
-#     runs-on: ubuntu-latest
-#     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::431092647962:role/github-actions-deploy-role
+          aws-region: us-east-1
 
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
 
-#       - name: Log in to Docker Hub
-#         uses: docker/login-action@v3
-#         with:
-#           username: ${{ secrets.DOCKERHUB_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push rate-limit-service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/rate-limit-service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/rate-limit-service:latest
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/rate-limit-service:${{ github.sha }}
 
-#       - name: Build and push
-#         uses: docker/build-push-action@v5
-#         with:
-#           context: .
-#           push: true
-#           tags: |
-#             ${{ secrets.DOCKERHUB_USERNAME }}/rate-limiter:js-latest
-#             ${{ secrets.DOCKERHUB_USERNAME }}/rate-limiter:js-${{ github.sha }}
+      - name: Build and push backend-service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/backend-service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/backend-service:latest
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/backend-service:${{ github.sha }}
+
