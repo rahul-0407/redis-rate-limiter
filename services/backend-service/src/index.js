@@ -2,6 +2,7 @@ import express from "express";
 import { rateLimiterMiddleware } from "./middleware/rateLimiterMiddleware.js";
 
 const app = express();
+app.set("trust proxy", true);
 app.use(express.json());
 
 app.use((req, res, next) => {

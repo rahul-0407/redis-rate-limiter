@@ -4,6 +4,13 @@ import { checkLimit } from "../grpcClient.js";
 
 export function rateLimiterMiddleware() {
   return async function rateLimit(req, res, next) {
+
+    console.log({
+      ip: req.ip,
+      xForwardedFor: req.headers["x-forwarded-for"],
+      remoteAddress: req.socket.remoteAddress,
+    });
+
     const entityId = req.user?.id || req.ip;
     const tier = req.user?.tier || "anonymous";
     const route = req.route?.path || req.path;
