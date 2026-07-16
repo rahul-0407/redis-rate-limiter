@@ -17,6 +17,10 @@ app.post("/", async (req, res) => {
   res.status(200).json({ success: true, msg: "Home page api" });
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 app.post("/user", limit, async (req, res) => {
   res.status(200).json({ success: true, msg: "User page api" });
 });
