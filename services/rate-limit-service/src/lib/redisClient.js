@@ -43,6 +43,9 @@ export function createRedisClient({
   client.on("reconnecting", () => {
     console.warn("[redis] reconnecting...");
   });
+  client.on("ready", () => {
+    console.log("[redis] connected and ready");
+  });
 
   return client;
 }
