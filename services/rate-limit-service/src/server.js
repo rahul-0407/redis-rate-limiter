@@ -9,7 +9,9 @@ import { resolveLimit, resolveCost } from "./config/limits.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PROTO_PATH = process.env.PROTO_PATH || path.join(__dirname, "../../../proto/ratelimit.proto");
+const PROTO_PATH =
+  process.env.PROTO_PATH ||
+  path.join(__dirname, "../../../proto/ratelimit.proto");
 
 const packageDef = protoLoader.loadSync(PROTO_PATH, {
   keepCase: true,
@@ -34,7 +36,11 @@ async function CheckLimit(call, callback) {
   const tokenCost = resolveCost(method, route);
 
   try {
+    console.log("[SERVER] Incoming:", call.request);
+
     const result = await limiter.check(key, limit, tokenCost);
+
+    console.log("[SERVER] Result:", result);
     callback(null, {
       allowed: result.allowed,
       remaining: result.remaining,
@@ -43,7 +49,12 @@ async function CheckLimit(call, callback) {
     });
   } catch (err) {
     console.error("[rate-limit-service] unexpected error:", err);
-    callback(null, { allowed: true, remaining: -1, retry_after_ms: 0, source: "fallback-open" });
+    callback(null, {
+      allowed: true,
+      remaining: -1,
+      retry_after_ms: 0,
+      source: "fallback-open",
+    });
   }
 }
 
@@ -52,10 +63,13 @@ function main() {
   server.addService(proto.RateLimitService.service, { CheckLimit });
 
   const port = process.env.GRPC_PORT || "50051";
-  server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), () => {
-    console.log(`[rate-limit-service] listening on :${port}`);
-  });
+  server.bindAsync(
+    `0.0.0.0:${port}`,
+    grpc.ServerCredentials.createInsecure(),
+    () => {
+      console.log(`[rate-limit-service] listening on :${port}`);
+    },
+  );
 }
-
 
 main();
