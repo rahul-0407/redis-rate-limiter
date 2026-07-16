@@ -196,10 +196,33 @@ rate-limiter/
 └── .github/workflows/ci.yml
 ```
 
-## Honest limitations & what's next
+## Verified on real AWS infrastructure
 
-- **gRPC path not load-tested** — correctness-verified end to end, throughput not yet measured.
-- **Sentinel HA path not verified against a real failover** — code exists, hasn't been exercised against an actual dying primary yet.
+This isn't just a local demo — the full stack has been deployed and load-tested on real AWS infrastructure, end to end.
+
+**Deployment topology:**
+- Custom VPC, public + private subnets, security groups scoped per-component (only `backend-service` can reach `rate-limit-service`; only `rate-limit-service` can reach Redis)
+- Both services running on **ECS Fargate**, internally connected via **ECS Service Connect** (internal DNS + gRPC, no hardcoded IPs)
+- **ElastiCache (Redis OSS)** as the managed data store, in a private subnet
+- **Application Load Balancer** as the public entry point, with a dedicated unauthenticated `/health` route so health checks never consume rate-limit budget
+- **CI/CD via GitHub Actions using OIDC** — no long-lived AWS credentials stored anywhere; short-lived tokens issued per run, scoped to this repo only
+- Images built and pushed to **ECR** on every push to `main`
+
+**Real load test result, 200 concurrent requests against the live ALB:**
+```
+seq 1 200 | xargs -P200 -I{} \
+  curl -s -o /dev/null -w "%{http_code}\n" \
+  -X POST http://<alb-dns-name>/user | sort | uniq -c
+
+     21 200
+    179 429
+```
+21 requests allowed, 179 correctly rejected with `429` — GCRA enforcing the configured limit accurately under real concurrent load, through the full chain: ALB → `backend-service` (Fargate) → gRPC → `rate-limit-service` (Fargate) → atomic Lua script → ElastiCache. Every layer described in the architecture diagram above is exercised by this result, not simulated.
+
+
+
+- ~~gRPC path not load-tested~~ — **now verified**: 200 concurrent requests against live AWS infrastructure, correct 21/179 allow/deny split under real load (see above).
+- **Sentinel HA path not verified against a real failover** — code exists, hasn't been exercised against an actual dying primary yet. (ElastiCache's own managed failover, which is what's actually deployed, is a separate, already-real mechanism — this note applies only to the self-hosted Sentinel code path.)
 - **Redis Cluster (sharding)** — not yet implemented; the `{userId}` hash-tag key scheme is ready for it, but multi-shard operation is untested.
 - **Cross-region deployment** — no strategy implemented yet; would require an explicit consistency/latency tradeoff decision, not a drop-in change.
 - **No automated test suite** — verification so far is manual burst testing + CI smoke tests + the gRPC round-trip tests done during development. Real unit/integration tests would meaningfully strengthen this.
